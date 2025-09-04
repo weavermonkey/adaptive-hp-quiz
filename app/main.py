@@ -98,12 +98,11 @@ def get_next_question(session_id: str):
 	if question is None:
 		difficulty = session_store.get_difficulty(session_id)
 		history = session_store.get_recent_history(session_id)
-		asked_texts = session_store.get_asked_texts(session_id)
+		asked_texts = session_store.get_avoid_texts(session_id)
 		correct_texts = session_store.get_correct_texts(session_id)
 		wrong_texts = session_store.get_wrong_texts(session_id)
 		target = "harder" if session_store.should_increase(session_id) else "easier" if session_store.should_decrease(session_id) else "baseline"
 		try:
-			gen_start = perf_counter()
 			generated = generator.generate_questions(
 				difficulty=difficulty,
 				history=history,
@@ -116,21 +115,24 @@ def get_next_question(session_id: str):
 				session_id=session_id,
 			)
 			session_store.set_question_buffer(session_id, generated)
-			logger.debug({
-				"event": "generated_questions",
-				"session_id": session_id,
-				"target": target,
-				"difficulty": difficulty,
-				"count": len(generated),
-				"duration_ms": int((perf_counter() - gen_start) * 1000),
-				"asked_count": len(asked_texts),
-				"correct_count": len(correct_texts),
-				"wrong_count": len(wrong_texts),
-			})
+			logger.debug({"event": "generated_questions", "session_id": session_id, "target": target, "difficulty": difficulty, "count": len(generated), "post_filter_buffer": session_store.buffer_len(session_id)})
 		except Exception:
 			logger.exception("generation_failed")
 			raise HTTPException(status_code=500, detail="generation_failed")
 		question = session_store.pop_next_question(session_id)
+		if question is None:
+			# As a last resort, fill with fallback questions so we always serve something
+			try:
+				fallback = generator._fallback_questions(difficulty, settings.question_batch_size)
+				session_store.set_question_buffer(session_id, fallback)
+				logger.debug({"event": "filled_with_fallback", "session_id": session_id, "count": len(fallback)})
+				question = session_store.pop_next_question(session_id)
+			except Exception:
+				logger.exception("fallback_fill_failed")
+				raise HTTPException(status_code=503, detail="no_questions_available")
+	# Final safety: only log/return if we truly have a question
+	if question is None:
+		raise HTTPException(status_code=503, detail="no_questions_available")
 	logger.debug({
 		"event": "serve_question",
 		"session_id": session_id,
@@ -161,6 +163,13 @@ def submit_answer(payload: SubmitAnswerRequest):
 		"streak": updated.recent_correct_count,
 		"window": updated.window_size,
 	})
+	try:
+		question_text = served.text if served else None
+		selected_text = next((o.text for o in (served.options if served else []) if o.id == payload.selected_option_id), None)
+		correct_text = next((o.text for o in (served.options if served else []) if o.id == (served.correct_option_id if served else "")), None)
+		generator.log_user_answer(payload.session_id, question_text, selected_text, correct_text, is_correct)
+	except Exception:
+		logger.debug({"event": "answer_log_failed"})
 	if updated.window_complete:
 		direction = determine_next_difficulty(updated.recent_results)
 		session_store.adjust_difficulty(payload.session_id, direction)
@@ -172,7 +181,6 @@ def submit_answer(payload: SubmitAnswerRequest):
 		wrong_texts = session_store.get_wrong_texts(payload.session_id)
 		target = "harder" if direction == "increase" else "easier" if direction == "decrease" else "baseline"
 		try:
-			gen_start = perf_counter()
 			generated = generator.generate_questions(
 				difficulty=difficulty,
 				history=history,
@@ -185,28 +193,9 @@ def submit_answer(payload: SubmitAnswerRequest):
 				session_id=payload.session_id,
 			)
 			session_store.set_question_buffer(payload.session_id, generated)
-			logger.debug({
-				"event": "regenerated_after_window",
-				"session_id": payload.session_id,
-				"direction": direction,
-				"difficulty": difficulty,
-				"count": len(generated),
-				"duration_ms": int((perf_counter() - gen_start) * 1000),
-				"asked_count": len(asked_texts),
-				"correct_count": len(correct_texts),
-				"wrong_count": len(wrong_texts),
-			})
+			logger.debug({"event": "regenerated_after_window", "session_id": payload.session_id, "direction": direction, "difficulty": difficulty, "count": len(generated)})
 		except Exception:
 			logger.exception("generation_after_window_failed")
-	try:
-		served = session_store.get_served_question(payload.session_id, payload.question_id)
-		question_text = served.text if served else None
-		selected_text = next((o.text for o in (served.options if served else []) if o.id == payload.selected_option_id), None)
-		correct_text = next((o.text for o in (served.options if served else []) if o.id == (served.correct_option_id if served else "")), None)
-		import asyncio
-		asyncio.get_event_loop().run_until_complete(generator.log_user_answer(payload.session_id, question_text, selected_text, correct_text, is_correct))
-	except Exception:
-		logger.debug({"event": "answer_log_failed"})
 	return SubmitAnswerResponse(correct=is_correct, difficulty=session_store.get_difficulty(payload.session_id))
 
 @app.get("/api/debug/prompt", response_model=DebugPromptResponse)

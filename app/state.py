@@ -122,9 +122,15 @@ class SessionStore:
 		return list(self.sessions[session_id].asked_question_texts)
 
 	def get_avoid_texts(self, session_id: str) -> List[str]:
-		avoid = set(self.sessions[session_id].asked_question_texts)
-		avoid.update(list(self.sessions[session_id].generated_question_texts))
-		return list(avoid)
+		# Prefer most-recent generated texts (already capped to 200) and then add asked texts up to a cap
+		recent_generated = list(self.sessions[session_id].generated_question_texts)
+		avoid_list: List[str] = list(recent_generated)
+		if len(avoid_list) < 200:
+			remaining = 200 - len(avoid_list)
+			# asked_question_texts is a set; take an arbitrary but bounded subset to keep prompt size reasonable
+			asked_subset = list(self.sessions[session_id].asked_question_texts)
+			avoid_list.extend(asked_subset[:remaining])
+		return avoid_list
 
 	def get_correct_texts(self, session_id: str) -> List[str]:
 		return list(self.sessions[session_id].correct_texts)
@@ -135,12 +141,14 @@ class SessionStore:
 	def _filter_new(self, session_id: str, candidates: List[Question]) -> List[Question]:
 		seen_ids = self.sessions[session_id].asked_question_ids
 		seen_texts = set(self.sessions[session_id].asked_question_texts)
-		seen_texts.update(list(self.sessions[session_id].generated_question_texts))
 		unique: List[Question] = []
 		for q in candidates:
 			if q.id in seen_ids or _norm(q.text) in seen_texts:
 				continue
 			unique.append(q)
 		return unique
+
+	def buffer_len(self, session_id: str) -> int:
+		return len(self.sessions[session_id].questions)
 
 session_store = SessionStore()

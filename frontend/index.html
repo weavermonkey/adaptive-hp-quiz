@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>Adaptive HP Quiz</title>
+	<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+	<div class="app">
+		<header>
+			<h1>Adaptive Harry Potter Quiz</h1>
+			<div id="score" class="score">Score: 0 / 0</div>
+		</header>
+		<main>
+			<div id="status"></div>
+			<div id="card" class="card hidden">
+				<div id="question" class="question"></div>
+				<div id="options" class="options"></div>
+				<div class="actions">
+					<button id="nextBtn" disabled>Next</button>
+				</div>
+			</div>
+		</main>
+	</div>
+	<div id="overlay" class="overlay hidden">
+		<div id="overlayContent" class="overlay-content"></div>
+	</div>
+	<script src="script.js"></script>
+</body>
+</html>

@@ -3,6 +3,7 @@ import json
 import uuid
 from typing import List, Dict, Any
 import logging
+from datetime import datetime, timezone
 import google.generativeai as genai
 from time import perf_counter
 from ..config import settings
@@ -21,9 +22,9 @@ class GeminiQuestionGenerator:
             genai.configure(api_key=settings.gemini_api_key)
         self.model_name = settings.gemini_model
         self.generation_config = {
-            "temperature": 0.6,
-            "top_p": 0.95,
-            "top_k": 40,
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "top_k": 50,
             "response_mime_type": "application/json",
         }
         self.prompt_builder = PromptBuilder()
@@ -38,8 +39,10 @@ class GeminiQuestionGenerator:
     def _append_log(self, session_id: str, record: Dict[str, Any]) -> None:
         try:
             path = self._session_log_path(session_id)
+            enriched = dict(record)
+            enriched.setdefault("ts", datetime.now(timezone.utc).isoformat())
             with open(path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                f.write(json.dumps(enriched, ensure_ascii=False) + "\n")
         except Exception:
             logger.exception("session_log_write_failed")
 
@@ -124,6 +127,9 @@ class GeminiQuestionGenerator:
                     opts.append(Option(id=str(uuid.uuid4()), text=text))
         return opts
 
+    def _norm_text(self, text: str) -> str:
+        return (text or "").strip().lower()
+
     def log_user_answer(self, session_id: str, question_text: str | None, selected_text: str | None, correct_text: str | None, is_correct: bool) -> None:
         self._append_log(session_id, {"event": "answer", "question": question_text, "selected": selected_text, "correct_text": correct_text, "is_correct": is_correct})
 
@@ -169,6 +175,8 @@ class GeminiQuestionGenerator:
             if not payload:
                 raise ValueError("payload_not_list")
             questions: List[Question] = []
+            seen_norm_texts: set[str] = set()
+            asked_norms: set[str] = set(self._norm_text(t) for t in (asked_texts or []))
             for item in payload[:count]:
                 if not isinstance(item, dict):
                     continue
@@ -186,9 +194,13 @@ class GeminiQuestionGenerator:
                 if not correct_id:
                     correct_id = opts[0].id
                 text_val = item.get("text", "")
-                q = Question(id=qid, text=text_val, options=opts, correct_option_id=correct_id, difficulty=item.get("difficulty", difficulty))
-                if asked_texts and text_val in asked_texts:
+                norm_text = self._norm_text(text_val)
+                if norm_text in asked_norms:
                     continue
+                if norm_text in seen_norm_texts:
+                    continue
+                seen_norm_texts.add(norm_text)
+                q = Question(id=qid, text=text_val, options=opts, correct_option_id=correct_id, difficulty=item.get("difficulty", difficulty))
                 questions.append(q)
             if session_id:
                 self._append_log(session_id, {"event": "generated", "difficulty": difficulty, "target": target, "count": len(questions), "latency_ms": latency_ms, "output_tokens": output_tokens})
