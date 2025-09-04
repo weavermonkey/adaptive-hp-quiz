@@ -14,3 +14,5 @@ logs/
 
 # Testing files
 test_backend.py
+debug_prompts.txt
+test_debug_prompt.py
