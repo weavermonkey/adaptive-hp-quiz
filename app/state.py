@@ -20,6 +20,7 @@ class SessionData:
 		self.generated_question_texts: Deque[str] = deque(maxlen=200)
 		self.correct_texts: List[str] = []
 		self.wrong_texts: List[str] = []
+		self.generation_in_progress: bool = False
 
 class SessionStore:
 	def __init__(self) -> None:
@@ -34,15 +35,17 @@ class SessionStore:
 	def get_difficulty(self, session_id: str) -> str:
 		return self.sessions[session_id].difficulty
 
-	def set_question_buffer(self, session_id: str, questions: List[Question]) -> None:
+	def add_questions_to_buffer(self, session_id: str, questions: List[Question], replace: bool = False) -> None:
+		"""Add questions to buffer. If replace=True, clears existing buffer first."""
 		filtered = self._filter_new(session_id, questions)
 		self._remember_generated(session_id, filtered)
-		self.sessions[session_id].questions = deque(filtered)
-
-	def extend_question_buffer(self, session_id: str, questions: List[Question]) -> None:
-		filtered = self._filter_new(session_id, questions)
-		self._remember_generated(session_id, filtered)
-		self.sessions[session_id].questions.extend(filtered)
+		
+		if replace or not self.sessions[session_id].questions:
+			# Replace buffer (for initial load or fallback)
+			self.sessions[session_id].questions = deque(filtered)
+		else:
+			# Extend existing buffer (for background generation)
+			self.sessions[session_id].questions.extend(filtered)
 
 	def _remember_generated(self, session_id: str, questions: List[Question]) -> None:
 		for q in questions:
@@ -150,5 +153,16 @@ class SessionStore:
 
 	def buffer_len(self, session_id: str) -> int:
 		return len(self.sessions[session_id].questions)
+
+	def needs_more_questions(self, session_id: str, threshold: int = 3) -> bool:
+		"""Check if buffer needs more questions and no generation is in progress."""
+		return (self.buffer_len(session_id) < threshold and 
+		        not self.is_generation_in_progress(session_id))
+
+	def is_generation_in_progress(self, session_id: str) -> bool:
+		return self.sessions[session_id].generation_in_progress
+
+	def set_generation_in_progress(self, session_id: str, in_progress: bool) -> None:
+		self.sessions[session_id].generation_in_progress = in_progress
 
 session_store = SessionStore()

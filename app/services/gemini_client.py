@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+import random
 from typing import List, Dict, Any
 import logging
 from datetime import datetime, timezone
@@ -22,7 +23,7 @@ class GeminiQuestionGenerator:
             genai.configure(api_key=settings.gemini_api_key)
         self.model_name = settings.gemini_model
         self.generation_config = {
-            "temperature": 0.2,
+            "temperature": 0.1,
             "top_p": 0.9,
             "top_k": 50,
             "response_mime_type": "application/json",
@@ -127,6 +128,21 @@ class GeminiQuestionGenerator:
                     opts.append(Option(id=str(uuid.uuid4()), text=text))
         return opts
 
+    def _shuffle_options(self, options: List[Option], correct_option_id: str) -> tuple[List[Option], str]:
+        """Shuffle options while tracking the new position of the correct answer"""
+        # Create a copy to avoid modifying the original
+        shuffled = options.copy()
+        random.shuffle(shuffled)
+        
+        # Find the new ID of the correct option
+        correct_option = next((opt for opt in options if opt.id == correct_option_id), None)
+        if correct_option:
+            new_correct_id = next((opt.id for opt in shuffled if opt.text == correct_option.text), correct_option_id)
+        else:
+            new_correct_id = correct_option_id
+            
+        return shuffled, new_correct_id
+
     def _norm_text(self, text: str) -> str:
         return (text or "").strip().lower()
 
@@ -142,7 +158,7 @@ class GeminiQuestionGenerator:
         if session_id:
             self._append_log(session_id, {"event": "prompt", "difficulty": difficulty, "target": target, "input_tokens": input_tokens, "prompt": prompt})
         try:
-            logger.debug({"event": "gemini_request", "model": self.model_name, "prompt_bytes": len(prompt), "input_tokens": input_tokens})
+            logger.debug({"event": "gemini_request", "model": self.model_name, "input_tokens": input_tokens})
             model = genai.GenerativeModel(self.model_name, generation_config=self.generation_config)
             t0 = perf_counter()
             response = model.generate_content(prompt)
@@ -200,7 +216,11 @@ class GeminiQuestionGenerator:
                 if norm_text in seen_norm_texts:
                     continue
                 seen_norm_texts.add(norm_text)
-                q = Question(id=qid, text=text_val, options=opts, correct_option_id=correct_id, difficulty=item.get("difficulty", difficulty))
+                
+                # Shuffle options to prevent correct answers always being in position A
+                shuffled_opts, shuffled_correct_id = self._shuffle_options(opts, correct_id)
+                
+                q = Question(id=qid, text=text_val, options=shuffled_opts, correct_option_id=shuffled_correct_id, difficulty=item.get("difficulty", difficulty))
                 questions.append(q)
             if session_id:
                 self._append_log(session_id, {"event": "generated", "difficulty": difficulty, "target": target, "count": len(questions), "latency_ms": latency_ms, "output_tokens": output_tokens})
@@ -222,6 +242,8 @@ class GeminiQuestionGenerator:
                 Option(id=str(uuid.uuid4()), text="Hermione"),
                 Option(id=str(uuid.uuid4()), text="Draco"),
             ]
-            items.append(Question(id=qid, text="Who is the boy who lived?", options=opts, correct_option_id=opts[0].id, difficulty=difficulty))
+            # Shuffle options for fallback questions too
+            shuffled_opts, shuffled_correct_id = self._shuffle_options(opts, opts[0].id)
+            items.append(Question(id=qid, text="Who is the boy who lived?", options=shuffled_opts, correct_option_id=shuffled_correct_id, difficulty=difficulty))
         logger.debug({"event": "fallback_questions_generated", "count": len(items), "difficulty": difficulty})
         return items

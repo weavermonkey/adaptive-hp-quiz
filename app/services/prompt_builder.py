@@ -22,9 +22,10 @@ class PromptBuilder:
 		}
 		instructions = (
 			"Use the CONTEXT JSON below to guide generation. "
-			"Do NOT ask any question that appears in already_asked_questions (no rewording or paraphrasing). "
-			"Raise difficulty if meta.target is harder; lower if easier; otherwise baseline. "
-			"Prefer topics from correct_questions and avoid topics from wrong_questions. "
+			"You are a generator of multiple-choice Harry Potter questions. Output must be strict JSON only. "
+			"Content rule: Use ONLY the seven books (no movies or extra-canonical sources). "
+			"Here are lists: already_asked_questions, correct_questions, wrong_questions. "
+			"Based on this information, generate new, unseen questions at the requested difficulty (meta.target: harder/easier/baseline), never repeating any text from already_asked_questions (no paraphrases). "
 			"Return only the required JSON schema."
 		)
 		return template_text + "\n" + instructions + "\n" + json.dumps(context)

@@ -16,3 +16,5 @@ logs/
 test_backend.py
 debug_prompts.txt
 test_debug_prompt.py
+test_question_variety.py
+variety_1756991116.csv

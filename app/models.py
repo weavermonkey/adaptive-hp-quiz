@@ -27,6 +27,8 @@ class SubmitAnswerRequest(BaseModel):
 class SubmitAnswerResponse(BaseModel):
     correct: bool
     difficulty: str
+    correct_answer_text: Optional[str] = None
+    window_completed: bool = False
 
 class RecentWindowInfo(BaseModel):
     window_complete: bool
